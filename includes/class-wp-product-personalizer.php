@@ -20,21 +20,20 @@ class WP_Product_Personalizer {
         add_filter('woocommerce_add_cart_item_data', array($this, 'add_personalization_to_cart'), 10, 3);
         add_filter('woocommerce_get_item_data', array($this, 'display_personalization_cart_item_data'), 10, 2);
         
-        // Compatibilidad con almacenamiento de pedidos de alto rendimiento
-        if ($this->is_hpos_enabled()) {
-            // Usar los nuevos hooks para HPOS
-            add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items_hpos'), 10, 4);
-            add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization_hpos'), 10, 1);
-        } else {
-            // Usar los hooks tradicionales
-            add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items'), 10, 4);
-            add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization'), 10, 1);
-        }
-        
-        // Hooks para procesar la subida de imágenes
+        // Hooks para procesar imágenes
         add_action('wp_ajax_wppp_upload_image', array($this, 'handle_image_upload'));
         add_action('wp_ajax_nopriv_wppp_upload_image', array($this, 'handle_image_upload'));
         
+        // Hooks para añadir datos a pedidos (usando un hook simple y directo que funciona con ambos sistemas)
+        add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items'), 10, 4);
+        
+        // Hook para mostrar datos personalizados en los pedidos
+        add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization'), 10, 1);
+        
+        // Hook para emails de pedidos
+        add_action('woocommerce_email_order_meta', array($this, 'add_personalization_to_emails'), 10, 3);
+        
+        // Scripts y estilos
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('admin_enqueue_scripts', array($this, 'admin_enqueue_scripts'));
     }
@@ -153,15 +152,8 @@ class WP_Product_Personalizer {
         $require_image = get_option('wppp_require_image', false);
         $require_message = get_option('wppp_require_message', false);
         
+        // Empezamos con un formulario visible normal sin AJAX para simplificar
         echo '<div class="wp-product-personalizer-fields">';
-        
-        // Campo de imagen
-        echo '<div class="wp-product-personalizer-image-field">';
-        echo '<label for="wppp_custom_image">' . esc_html($image_label) . ($require_image ? ' <span class="required">*</span>' : '') . '</label>';
-        echo '<input type="file" id="wppp_custom_image" name="wppp_custom_image" accept="image/*" ' . ($require_image ? 'required' : '') . '>';
-        echo '<div id="wppp_image_preview"></div>';
-        echo '<input type="hidden" name="wppp_custom_image_data" id="wppp_custom_image_data" value="">';
-        echo '</div>';
         
         // Campo de mensaje
         echo '<div class="wp-product-personalizer-message-field">';
@@ -169,52 +161,31 @@ class WP_Product_Personalizer {
         echo '<textarea id="wppp_custom_message" name="wppp_custom_message" rows="3" ' . ($require_message ? 'required' : '') . '></textarea>';
         echo '</div>';
         
+        // Campo de imagen - simplificado para evitar problemas con AJAX
+        echo '<div class="wp-product-personalizer-image-field">';
+        echo '<label for="wppp_custom_image">' . esc_html($image_label) . ($require_image ? ' <span class="required">*</span>' : '') . '</label>';
+        echo '<input type="file" id="wppp_custom_image" name="wppp_custom_image" accept="image/*" ' . ($require_image ? 'required' : '') . '>';
+        echo '<div id="wppp_image_preview"></div>';
+        echo '</div>';
+        
         echo '</div>';
     }
     
     /**
-     * Manejar la subida de imágenes vía AJAX
+     * Manejar la subida de imágenes mediante AJAX
      */
     public function handle_image_upload() {
-        // Verificar nonce
-        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wppp_upload_image')) {
-            wp_send_json_error('Verificación de seguridad fallida');
-            die();
-        }
+        check_ajax_referer('wppp_upload_image', 'nonce');
         
-        if (!isset($_FILES['file']) || empty($_FILES['file']['name'])) {
-            wp_send_json_error('No se ha subido ningún archivo');
-            die();
-        }
+        $upload = wp_handle_upload($_FILES['file'], array('test_form' => false));
         
-        // Configurar directorio de carga
-        $upload_dir = wp_upload_dir();
-        $personalized_dir = $upload_dir['basedir'] . '/personalized-products';
-        
-        // Asegurarse de que el directorio existe
-        if (!file_exists($personalized_dir)) {
-            wp_mkdir_p($personalized_dir);
-        }
-        
-        // Procesar la imagen
-        $file = $_FILES['file'];
-        $file_extension = pathinfo($file['name'], PATHINFO_EXTENSION);
-        $filename = 'personalized-' . time() . '-' . wp_rand(1000, 9999) . '.' . $file_extension;
-        $file_path = $personalized_dir . '/' . $filename;
-        
-        // Mover archivo
-        if (move_uploaded_file($file['tmp_name'], $file_path)) {
-            $file_url = $upload_dir['baseurl'] . '/personalized-products/' . $filename;
-            wp_send_json_success(array(
-                'path' => $file_path,
-                'url' => $file_url,
-                'name' => $filename
-            ));
+        if (isset($upload['error'])) {
+            wp_send_json_error($upload['error']);
         } else {
-            wp_send_json_error('Error al guardar la imagen');
+            wp_send_json_success($upload);
         }
         
-        die();
+        wp_die();
     }
     
     /**
@@ -225,25 +196,57 @@ class WP_Product_Personalizer {
             return $cart_item_data;
         }
         
-        // Procesar el mensaje personalizado
+        // Guardar mensaje personalizado
         if (isset($_POST['wppp_custom_message']) && !empty($_POST['wppp_custom_message'])) {
             $cart_item_data['wppp_custom_message'] = sanitize_textarea_field($_POST['wppp_custom_message']);
         }
         
-        // Procesar la imagen personalizada (usando los datos subidos por AJAX)
-        if (isset($_POST['wppp_custom_image_data']) && !empty($_POST['wppp_custom_image_data'])) {
-            $image_data = json_decode(stripslashes($_POST['wppp_custom_image_data']), true);
-            if (is_array($image_data) && isset($image_data['url']) && isset($image_data['path']) && isset($image_data['name'])) {
-                $cart_item_data['wppp_custom_image'] = $image_data;
+        // Procesar la imagen personalizada
+        if (isset($_FILES['wppp_custom_image']) && !empty($_FILES['wppp_custom_image']['name'])) {
+            // Usamos el sistema de manejo de archivos de WordPress
+            require_once(ABSPATH . 'wp-admin/includes/file.php');
+            require_once(ABSPATH . 'wp-admin/includes/media.php');
+            require_once(ABSPATH . 'wp-admin/includes/image.php');
+            
+            // Configuramos un directorio personalizado
+            add_filter('upload_dir', array($this, 'custom_upload_dir'));
+            
+            // Subir el archivo
+            $upload = wp_handle_upload($_FILES['wppp_custom_image'], array('test_form' => false));
+            
+            // Restaurar directorio original
+            remove_filter('upload_dir', array($this, 'custom_upload_dir'));
+            
+            if (!isset($upload['error']) && isset($upload['url']) && isset($upload['file'])) {
+                $cart_item_data['wppp_custom_image'] = array(
+                    'url' => $upload['url'],
+                    'file' => $upload['file'],
+                    'name' => basename($upload['file'])
+                );
             }
         }
         
         // Si añadimos datos personalizados, hacer que el item sea único en el carrito
         if (!empty($cart_item_data['wppp_custom_message']) || !empty($cart_item_data['wppp_custom_image'])) {
-            $cart_item_data['unique_key'] = md5(microtime() . rand());
+            $cart_item_data['wppp_unique_key'] = md5(microtime() . rand());
         }
         
         return $cart_item_data;
+    }
+    
+    /**
+     * Personalizar el directorio de carga para las imágenes
+     */
+    public function custom_upload_dir($uploads) {
+        $uploads['subdir'] = '/personalized-products';
+        $uploads['path'] = $uploads['basedir'] . $uploads['subdir'];
+        $uploads['url'] = $uploads['baseurl'] . $uploads['subdir'];
+        
+        if (!file_exists($uploads['path'])) {
+            wp_mkdir_p($uploads['path']);
+        }
+        
+        return $uploads;
     }
     
     /**
@@ -261,7 +264,10 @@ class WP_Product_Personalizer {
         if (isset($cart_item['wppp_custom_image']) && !empty($cart_item['wppp_custom_image']['url'])) {
             $item_data[] = array(
                 'key' => __('Imagen personalizada', 'wp-product-personalizer'),
-                'value' => __('Imagen personalizada adjunta', 'wp-product-personalizer'),
+                'value' => sprintf('<a href="%s" target="_blank">%s</a>', 
+                    esc_url($cart_item['wppp_custom_image']['url']), 
+                    __('Ver imagen personalizada', 'wp-product-personalizer')
+                ),
                 'display' => '',
             );
         }
@@ -270,101 +276,151 @@ class WP_Product_Personalizer {
     }
     
     /**
-     * Añadir datos de personalización a los items del pedido (sistema tradicional)
+     * Añadir datos de personalización a los items del pedido
      */
     public function add_personalization_to_order_items($item, $cart_item_key, $values, $order) {
-        // Guardar el mensaje personalizado
+        // Guardar mensaje personalizado
         if (isset($values['wppp_custom_message']) && !empty($values['wppp_custom_message'])) {
-            $item->add_meta_data(__('Mensaje personalizado', 'wp-product-personalizer'), $values['wppp_custom_message']);
+            $item->update_meta_data('wppp_custom_message', $values['wppp_custom_message']);
         }
         
-        // Guardar la imagen personalizada
+        // Guardar imagen personalizada
         if (isset($values['wppp_custom_image']) && !empty($values['wppp_custom_image']['url'])) {
-            $item->add_meta_data(__('Imagen personalizada', 'wp-product-personalizer'), $values['wppp_custom_image']['url']);
-            $item->add_meta_data('_wppp_custom_image_path', $values['wppp_custom_image']['path'], true);
-            $item->add_meta_data('_wppp_custom_image_name', $values['wppp_custom_image']['name'], true);
-        }
-    }
-    
-    /**
-     * Añadir datos de personalización a los items del pedido (compatible con HPOS)
-     */
-    public function add_personalization_to_order_items_hpos($item, $cart_item_key, $values, $order) {
-        // Para HPOS, el método es similar ya que WooCommerce maneja la abstracción
-        if (isset($values['wppp_custom_message']) && !empty($values['wppp_custom_message'])) {
-            $item->add_meta_data(__('Mensaje personalizado', 'wp-product-personalizer'), $values['wppp_custom_message']);
-        }
-        
-        if (isset($values['wppp_custom_image']) && !empty($values['wppp_custom_image']['url'])) {
-            $item->add_meta_data(__('Imagen personalizada', 'wp-product-personalizer'), $values['wppp_custom_image']['url']);
-            $item->add_meta_data('_wppp_custom_image_path', $values['wppp_custom_image']['path'], true);
-            $item->add_meta_data('_wppp_custom_image_name', $values['wppp_custom_image']['name'], true);
-        }
-    }
-    
-    /**
-     * Mostrar información de personalización en la página de administración del pedido (sistema tradicional)
-     */
-    public function display_order_personalization($order) {
-        $items = $order->get_items();
-        
-        foreach ($items as $item_id => $item) {
-            $message = $item->get_meta('Mensaje personalizado');
-            $image_url = $item->get_meta('Imagen personalizada');
-            
-            if (!empty($message) || !empty($image_url)) {
-                echo '<div class="order-personalization">';
-                echo '<h3>' . __('Personalización para', 'wp-product-personalizer') . ' ' . $item->get_name() . '</h3>';
-                
-                if (!empty($message)) {
-                    echo '<p><strong>' . __('Mensaje personalizado', 'wp-product-personalizer') . ':</strong> ' . esc_html($message) . '</p>';
-                }
-                
-                if (!empty($image_url)) {
-                    echo '<p><strong>' . __('Imagen personalizada', 'wp-product-personalizer') . ':</strong></p>';
-                    echo '<p><a href="' . esc_url($image_url) . '" target="_blank">';
-                    echo '<img src="' . esc_url($image_url) . '" style="max-width: 150px; max-height: 150px;">';
-                    echo '</a></p>';
-                }
-                
-                echo '</div>';
+            $item->update_meta_data('wppp_custom_image_url', $values['wppp_custom_image']['url']);
+            if (isset($values['wppp_custom_image']['file'])) {
+                $item->update_meta_data('wppp_custom_image_file', $values['wppp_custom_image']['file']);
+            }
+            if (isset($values['wppp_custom_image']['name'])) {
+                $item->update_meta_data('wppp_custom_image_name', $values['wppp_custom_image']['name']);
             }
         }
     }
     
     /**
-     * Mostrar información de personalización en la página de administración del pedido (compatible con HPOS)
+     * Mostrar información de personalización en la página de administración del pedido
      */
-    public function display_order_personalization_hpos($order) {
-        // Asegurarse de que tenemos un objeto de pedido compatible con HPOS
-        if (!($order instanceof \WC_Order)) {
+    public function display_order_personalization($order) {
+        if (!$order) {
             return;
         }
         
-        // Obtener los ítems del pedido usando el sistema HPOS
-        $items = $order->get_items();
+        echo '<div class="wppp-order-personalization">';
+        echo '<h3>' . __('Personalizaciones de productos', 'wp-product-personalizer') . '</h3>';
         
-        foreach ($items as $item_id => $item) {
-            $message = $item->get_meta('Mensaje personalizado');
-            $image_url = $item->get_meta('Imagen personalizada');
+        $found_personalization = false;
+        
+        // Procesar cada ítem del pedido
+        foreach ($order->get_items() as $item_id => $item) {
+            $product_name = $item->get_name();
+            $custom_message = $item->get_meta('wppp_custom_message');
+            $custom_image_url = $item->get_meta('wppp_custom_image_url');
             
-            if (!empty($message) || !empty($image_url)) {
-                echo '<div class="order-personalization">';
-                echo '<h3>' . __('Personalización para', 'wp-product-personalizer') . ' ' . $item->get_name() . '</h3>';
+            // Si hay personalización para este ítem
+            if (!empty($custom_message) || !empty($custom_image_url)) {
+                $found_personalization = true;
                 
-                if (!empty($message)) {
-                    echo '<p><strong>' . __('Mensaje personalizado', 'wp-product-personalizer') . ':</strong> ' . esc_html($message) . '</p>';
+                echo '<div class="wppp-item-personalization">';
+                echo '<h4>' . sprintf(__('Personalización para: %s', 'wp-product-personalizer'), esc_html($product_name)) . '</h4>';
+                
+                // Mostrar mensaje personalizado
+                if (!empty($custom_message)) {
+                    echo '<div class="wppp-custom-message">';
+                    echo '<strong>' . __('Mensaje personalizado:', 'wp-product-personalizer') . '</strong>';
+                    echo '<p>' . esc_html($custom_message) . '</p>';
+                    echo '</div>';
                 }
                 
-                if (!empty($image_url)) {
-                    echo '<p><strong>' . __('Imagen personalizada', 'wp-product-personalizer') . ':</strong></p>';
-                    echo '<p><a href="' . esc_url($image_url) . '" target="_blank">';
-                    echo '<img src="' . esc_url($image_url) . '" style="max-width: 150px; max-height: 150px;">';
-                    echo '</a></p>';
+                // Mostrar imagen personalizada
+                if (!empty($custom_image_url)) {
+                    echo '<div class="wppp-custom-image">';
+                    echo '<strong>' . __('Imagen personalizada:', 'wp-product-personalizer') . '</strong><br>';
+                    echo '<a href="' . esc_url($custom_image_url) . '" target="_blank">';
+                    echo '<img src="' . esc_url($custom_image_url) . '" style="max-width: 150px; max-height: 150px; margin-top: 10px; border: 1px solid #ddd; padding: 5px;">';
+                    echo '</a>';
+                    echo '</div>';
                 }
                 
                 echo '</div>';
             }
+        }
+        
+        if (!$found_personalization) {
+            echo '<p>' . __('No hay personalizaciones para este pedido.', 'wp-product-personalizer') . '</p>';
+        }
+        
+        echo '</div>';
+    }
+    
+    /**
+     * Añadir información de personalización a los emails de pedidos
+     */
+    public function add_personalization_to_emails($order, $sent_to_admin, $plain_text) {
+        if (!$order) {
+            return;
+        }
+        
+        $found_personalization = false;
+        
+        // Empezar tabla HTML para formato normal o texto plano para emails de texto
+        if (!$plain_text) {
+            echo '<h2>' . __('Personalizaciones de productos', 'wp-product-personalizer') . '</h2>';
+            echo '<table class="td" cellspacing="0" cellpadding="6" style="width: 100%; margin-bottom: 20px; border: 1px solid #e5e5e5;">';
+            echo '<thead><tr><th>' . __('Producto', 'wp-product-personalizer') . '</th><th>' . __('Personalización', 'wp-product-personalizer') . '</th></tr></thead><tbody>';
+        } else {
+            echo __('Personalizaciones de productos', 'wp-product-personalizer') . "\n\n";
+        }
+        
+        // Procesar cada ítem del pedido
+        foreach ($order->get_items() as $item_id => $item) {
+            $product_name = $item->get_name();
+            $custom_message = $item->get_meta('wppp_custom_message');
+            $custom_image_url = $item->get_meta('wppp_custom_image_url');
+            
+            // Si hay personalización para este ítem
+            if (!empty($custom_message) || !empty($custom_image_url)) {
+                $found_personalization = true;
+                
+                if (!$plain_text) {
+                    echo '<tr><td>' . esc_html($product_name) . '</td><td>';
+                    
+                    if (!empty($custom_message)) {
+                        echo '<strong>' . __('Mensaje:', 'wp-product-personalizer') . '</strong> ' . esc_html($custom_message) . '<br>';
+                    }
+                    
+                    if (!empty($custom_image_url)) {
+                        echo '<strong>' . __('Imagen:', 'wp-product-personalizer') . '</strong> <a href="' . esc_url($custom_image_url) . '" target="_blank">' . __('Ver imagen', 'wp-product-personalizer') . '</a>';
+                    }
+                    
+                    echo '</td></tr>';
+                } else {
+                    echo esc_html($product_name) . "\n";
+                    
+                    if (!empty($custom_message)) {
+                        echo __('Mensaje:', 'wp-product-personalizer') . ' ' . esc_html($custom_message) . "\n";
+                    }
+                    
+                    if (!empty($custom_image_url)) {
+                        echo __('Imagen:', 'wp-product-personalizer') . ' ' . esc_url($custom_image_url) . "\n";
+                    }
+                    
+                    echo "\n";
+                }
+            }
+        }
+        
+        if (!$found_personalization) {
+            if (!$plain_text) {
+                echo '<tr><td colspan="2">' . __('No hay personalizaciones para este pedido.', 'wp-product-personalizer') . '</td></tr>';
+            } else {
+                echo __('No hay personalizaciones para este pedido.', 'wp-product-personalizer') . "\n";
+            }
+        }
+        
+        // Cerrar tabla HTML para formato normal
+        if (!$plain_text) {
+            echo '</tbody></table>';
+        } else {
+            echo "\n\n";
         }
     }
     
