@@ -1,0 +1,48 @@
+/**
+ * Estilos para la página de administración
+ */
+.wppp-admin-container {
+    float: left;
+    width: 65%;
+    box-sizing: border-box;
+    margin-right: 2%;
+}
+
+.wppp-admin-sidebar {
+    float: left;
+    width: 30%;
+    box-sizing: border-box;
+}
+
+.wppp-admin-box {
+    background-color: #fff;
+    border: 1px solid #ccd0d4;
+    border-radius: 5px;
+    padding: 15px;
+    margin-top: 20px;
+}
+
+.wppp-admin-box h3 {
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+}
+
+.wppp-admin-box ul {
+    list-style: none;
+    padding-left: 5px;
+}
+
+.wppp-admin-box ul li {
+    margin-bottom: 8px;
+}
+
+/* Estilos responsivos */
+@media (max-width: 782px) {
+    .wppp-admin-container,
+    .wppp-admin-sidebar {
+        float: none;
+        width: 100%;
+        margin-right: 0;
+    }
+}
