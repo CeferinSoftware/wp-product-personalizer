@@ -31,6 +31,10 @@ class WP_Product_Personalizer {
             add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization'), 10, 1);
         }
         
+        // Hooks para procesar la subida de imágenes
+        add_action('wp_ajax_wppp_upload_image', array($this, 'handle_image_upload'));
+        add_action('wp_ajax_nopriv_wppp_upload_image', array($this, 'handle_image_upload'));
+        
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('admin_enqueue_scripts', array($this, 'admin_enqueue_scripts'));
     }
@@ -156,6 +160,7 @@ class WP_Product_Personalizer {
         echo '<label for="wppp_custom_image">' . esc_html($image_label) . ($require_image ? ' <span class="required">*</span>' : '') . '</label>';
         echo '<input type="file" id="wppp_custom_image" name="wppp_custom_image" accept="image/*" ' . ($require_image ? 'required' : '') . '>';
         echo '<div id="wppp_image_preview"></div>';
+        echo '<input type="hidden" name="wppp_custom_image_data" id="wppp_custom_image_data" value="">';
         echo '</div>';
         
         // Campo de mensaje
@@ -165,6 +170,51 @@ class WP_Product_Personalizer {
         echo '</div>';
         
         echo '</div>';
+    }
+    
+    /**
+     * Manejar la subida de imágenes vía AJAX
+     */
+    public function handle_image_upload() {
+        // Verificar nonce
+        if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'wppp_upload_image')) {
+            wp_send_json_error('Verificación de seguridad fallida');
+            die();
+        }
+        
+        if (!isset($_FILES['file']) || empty($_FILES['file']['name'])) {
+            wp_send_json_error('No se ha subido ningún archivo');
+            die();
+        }
+        
+        // Configurar directorio de carga
+        $upload_dir = wp_upload_dir();
+        $personalized_dir = $upload_dir['basedir'] . '/personalized-products';
+        
+        // Asegurarse de que el directorio existe
+        if (!file_exists($personalized_dir)) {
+            wp_mkdir_p($personalized_dir);
+        }
+        
+        // Procesar la imagen
+        $file = $_FILES['file'];
+        $file_extension = pathinfo($file['name'], PATHINFO_EXTENSION);
+        $filename = 'personalized-' . time() . '-' . wp_rand(1000, 9999) . '.' . $file_extension;
+        $file_path = $personalized_dir . '/' . $filename;
+        
+        // Mover archivo
+        if (move_uploaded_file($file['tmp_name'], $file_path)) {
+            $file_url = $upload_dir['baseurl'] . '/personalized-products/' . $filename;
+            wp_send_json_success(array(
+                'path' => $file_path,
+                'url' => $file_url,
+                'name' => $filename
+            ));
+        } else {
+            wp_send_json_error('Error al guardar la imagen');
+        }
+        
+        die();
     }
     
     /**
@@ -180,27 +230,11 @@ class WP_Product_Personalizer {
             $cart_item_data['wppp_custom_message'] = sanitize_textarea_field($_POST['wppp_custom_message']);
         }
         
-        // Procesar la imagen personalizada
-        if (isset($_FILES['wppp_custom_image']) && !empty($_FILES['wppp_custom_image']['name'])) {
-            $upload_dir = wp_upload_dir();
-            $personalized_dir = $upload_dir['basedir'] . '/personalized-products';
-            
-            // Asegurarse de que el directorio existe
-            if (!file_exists($personalized_dir)) {
-                wp_mkdir_p($personalized_dir);
-            }
-            
-            // Mover el archivo temporal al directorio de carga
-            $file_extension = pathinfo($_FILES['wppp_custom_image']['name'], PATHINFO_EXTENSION);
-            $filename = 'personalized-' . time() . '-' . wp_rand(1000, 9999) . '.' . $file_extension;
-            $file_path = $personalized_dir . '/' . $filename;
-            
-            if (move_uploaded_file($_FILES['wppp_custom_image']['tmp_name'], $file_path)) {
-                $cart_item_data['wppp_custom_image'] = array(
-                    'path' => $file_path,
-                    'url' => $upload_dir['baseurl'] . '/personalized-products/' . $filename,
-                    'name' => $filename
-                );
+        // Procesar la imagen personalizada (usando los datos subidos por AJAX)
+        if (isset($_POST['wppp_custom_image_data']) && !empty($_POST['wppp_custom_image_data'])) {
+            $image_data = json_decode(stripslashes($_POST['wppp_custom_image_data']), true);
+            if (is_array($image_data) && isset($image_data['url']) && isset($image_data['path']) && isset($image_data['name'])) {
+                $cart_item_data['wppp_custom_image'] = $image_data;
             }
         }
         
@@ -216,7 +250,7 @@ class WP_Product_Personalizer {
      * Mostrar datos de personalización en el carrito
      */
     public function display_personalization_cart_item_data($item_data, $cart_item) {
-        if (isset($cart_item['wppp_custom_message'])) {
+        if (isset($cart_item['wppp_custom_message']) && !empty($cart_item['wppp_custom_message'])) {
             $item_data[] = array(
                 'key' => __('Mensaje personalizado', 'wp-product-personalizer'),
                 'value' => wc_clean($cart_item['wppp_custom_message']),
@@ -224,7 +258,7 @@ class WP_Product_Personalizer {
             );
         }
         
-        if (isset($cart_item['wppp_custom_image'])) {
+        if (isset($cart_item['wppp_custom_image']) && !empty($cart_item['wppp_custom_image']['url'])) {
             $item_data[] = array(
                 'key' => __('Imagen personalizada', 'wp-product-personalizer'),
                 'value' => __('Imagen personalizada adjunta', 'wp-product-personalizer'),
@@ -239,11 +273,13 @@ class WP_Product_Personalizer {
      * Añadir datos de personalización a los items del pedido (sistema tradicional)
      */
     public function add_personalization_to_order_items($item, $cart_item_key, $values, $order) {
-        if (isset($values['wppp_custom_message'])) {
+        // Guardar el mensaje personalizado
+        if (isset($values['wppp_custom_message']) && !empty($values['wppp_custom_message'])) {
             $item->add_meta_data(__('Mensaje personalizado', 'wp-product-personalizer'), $values['wppp_custom_message']);
         }
         
-        if (isset($values['wppp_custom_image'])) {
+        // Guardar la imagen personalizada
+        if (isset($values['wppp_custom_image']) && !empty($values['wppp_custom_image']['url'])) {
             $item->add_meta_data(__('Imagen personalizada', 'wp-product-personalizer'), $values['wppp_custom_image']['url']);
             $item->add_meta_data('_wppp_custom_image_path', $values['wppp_custom_image']['path'], true);
             $item->add_meta_data('_wppp_custom_image_name', $values['wppp_custom_image']['name'], true);
@@ -254,11 +290,12 @@ class WP_Product_Personalizer {
      * Añadir datos de personalización a los items del pedido (compatible con HPOS)
      */
     public function add_personalization_to_order_items_hpos($item, $cart_item_key, $values, $order) {
-        if (isset($values['wppp_custom_message'])) {
+        // Para HPOS, el método es similar ya que WooCommerce maneja la abstracción
+        if (isset($values['wppp_custom_message']) && !empty($values['wppp_custom_message'])) {
             $item->add_meta_data(__('Mensaje personalizado', 'wp-product-personalizer'), $values['wppp_custom_message']);
         }
         
-        if (isset($values['wppp_custom_image'])) {
+        if (isset($values['wppp_custom_image']) && !empty($values['wppp_custom_image']['url'])) {
             $item->add_meta_data(__('Imagen personalizada', 'wp-product-personalizer'), $values['wppp_custom_image']['url']);
             $item->add_meta_data('_wppp_custom_image_path', $values['wppp_custom_image']['path'], true);
             $item->add_meta_data('_wppp_custom_image_name', $values['wppp_custom_image']['name'], true);
@@ -344,6 +381,7 @@ class WP_Product_Personalizer {
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'require_image' => get_option('wppp_require_image', false),
                 'require_message' => get_option('wppp_require_message', false),
+                'nonce' => wp_create_nonce('wppp_upload_image')
             ));
         }
     }
