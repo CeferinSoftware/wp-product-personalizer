@@ -8,23 +8,17 @@ class WP_Product_Personalizer {
      * Inicializar el plugin y definir sus hooks
      */
     public function run() {
-        // Cargar dependencias
-        $this->load_dependencies();
-        
         // Definir hooks admin
         add_action('admin_menu', array($this, 'add_admin_menu'));
         add_action('admin_init', array($this, 'register_settings'));
         
         // Definir hooks públicos
-        add_action('woocommerce_before_add_to_cart_button', array($this, 'display_personalization_fields'));
+        add_action('woocommerce_before_add_to_cart_button', array($this, 'display_personalization_fields'), 10);
+        add_filter('woocommerce_add_to_cart_validation', array($this, 'validate_personalization_fields'), 10, 3);
         add_filter('woocommerce_add_cart_item_data', array($this, 'add_personalization_to_cart'), 10, 3);
         add_filter('woocommerce_get_item_data', array($this, 'display_personalization_cart_item_data'), 10, 2);
         
-        // Hooks para procesar imágenes
-        add_action('wp_ajax_wppp_upload_image', array($this, 'handle_image_upload'));
-        add_action('wp_ajax_nopriv_wppp_upload_image', array($this, 'handle_image_upload'));
-        
-        // Hooks para añadir datos a pedidos (usando un hook simple y directo que funciona con ambos sistemas)
+        // Hooks para añadir datos a pedidos
         add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items'), 10, 4);
         
         // Hook para mostrar datos personalizados en los pedidos
@@ -36,23 +30,37 @@ class WP_Product_Personalizer {
         // Scripts y estilos
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('admin_enqueue_scripts', array($this, 'admin_enqueue_scripts'));
+        
+        // Log para depuración
+        add_action('init', array($this, 'init_log'));
     }
     
     /**
-     * Cargar dependencias del plugin
+     * Inicializar log
      */
-    private function load_dependencies() {
-        // Aquí se pueden cargar clases adicionales si se requieren
-    }
-    
-    /**
-     * Comprobar si el almacenamiento de pedidos de alto rendimiento está activado
-     */
-    private function is_hpos_enabled() {
-        if (class_exists('\Automattic\WooCommerce\Utilities\OrderUtil')) {
-            return \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+    public function init_log() {
+        if (!defined('WP_DEBUG_LOG') || !WP_DEBUG_LOG) {
+            return;
         }
-        return false;
+        
+        $this->log_message('Plugin WP Product Personalizer iniciado');
+    }
+    
+    /**
+     * Función de log para depuración
+     */
+    private function log_message($message, $data = null) {
+        if (!defined('WP_DEBUG_LOG') || !WP_DEBUG_LOG) {
+            return;
+        }
+        
+        if ($data !== null) {
+            $log_message = '[WP Product Personalizer] ' . $message . ': ' . print_r($data, true);
+        } else {
+            $log_message = '[WP Product Personalizer] ' . $message;
+        }
+        
+        error_log($log_message);
     }
     
     /**
@@ -152,8 +160,12 @@ class WP_Product_Personalizer {
         $require_image = get_option('wppp_require_image', false);
         $require_message = get_option('wppp_require_message', false);
         
-        // Empezamos con un formulario visible normal sin AJAX para simplificar
         echo '<div class="wp-product-personalizer-fields">';
+        
+        // Mensaje de error/éxito si existe
+        if (isset($_GET['wppp_error'])) {
+            echo '<div class="wppp-error">' . esc_html(urldecode($_GET['wppp_error'])) . '</div>';
+        }
         
         // Campo de mensaje
         echo '<div class="wp-product-personalizer-message-field">';
@@ -172,20 +184,37 @@ class WP_Product_Personalizer {
     }
     
     /**
-     * Manejar la subida de imágenes mediante AJAX
+     * Validar campos de personalización antes de añadir al carrito
      */
-    public function handle_image_upload() {
-        check_ajax_referer('wppp_upload_image', 'nonce');
-        
-        $upload = wp_handle_upload($_FILES['file'], array('test_form' => false));
-        
-        if (isset($upload['error'])) {
-            wp_send_json_error($upload['error']);
-        } else {
-            wp_send_json_success($upload);
+    public function validate_personalization_fields($passed, $product_id, $quantity) {
+        if (!$this->should_display_fields()) {
+            return $passed;
         }
         
-        wp_die();
+        $require_image = get_option('wppp_require_image', false);
+        $require_message = get_option('wppp_require_message', false);
+        
+        // Comprobar si se requiere mensaje y está vacío
+        if ($require_message && (empty($_POST['wppp_custom_message']) || strlen(trim($_POST['wppp_custom_message'])) === 0)) {
+            wc_add_notice(__('Por favor, introduce un mensaje personalizado.', 'wp-product-personalizer'), 'error');
+            $passed = false;
+        }
+        
+        // Comprobar si se requiere imagen y no se ha subido
+        if ($require_image && (empty($_FILES['wppp_custom_image']) || empty($_FILES['wppp_custom_image']['name']))) {
+            wc_add_notice(__('Por favor, sube una imagen personalizada.', 'wp-product-personalizer'), 'error');
+            $passed = false;
+        }
+        
+        // Log de depuración
+        $this->log_message('Validación de campos', array(
+            'passed' => $passed,
+            'product_id' => $product_id,
+            'files' => isset($_FILES) ? $_FILES : 'No hay archivos',
+            'post' => isset($_POST) ? $_POST : 'No hay datos POST'
+        ));
+        
+        return $passed;
     }
     
     /**
@@ -196,17 +225,29 @@ class WP_Product_Personalizer {
             return $cart_item_data;
         }
         
+        // Log para depuración
+        $this->log_message('Añadiendo datos al carrito', array(
+            'product_id' => $product_id,
+            'post_data' => $_POST,
+            'files' => isset($_FILES) ? $_FILES : 'No hay archivos'
+        ));
+        
         // Guardar mensaje personalizado
         if (isset($_POST['wppp_custom_message']) && !empty($_POST['wppp_custom_message'])) {
             $cart_item_data['wppp_custom_message'] = sanitize_textarea_field($_POST['wppp_custom_message']);
+            
+            // Log del mensaje
+            $this->log_message('Mensaje personalizado guardado', $cart_item_data['wppp_custom_message']);
         }
         
         // Procesar la imagen personalizada
         if (isset($_FILES['wppp_custom_image']) && !empty($_FILES['wppp_custom_image']['name'])) {
             // Usamos el sistema de manejo de archivos de WordPress
-            require_once(ABSPATH . 'wp-admin/includes/file.php');
-            require_once(ABSPATH . 'wp-admin/includes/media.php');
-            require_once(ABSPATH . 'wp-admin/includes/image.php');
+            if (!function_exists('wp_handle_upload')) {
+                require_once(ABSPATH . 'wp-admin/includes/file.php');
+                require_once(ABSPATH . 'wp-admin/includes/media.php');
+                require_once(ABSPATH . 'wp-admin/includes/image.php');
+            }
             
             // Configuramos un directorio personalizado
             add_filter('upload_dir', array($this, 'custom_upload_dir'));
@@ -217,18 +258,30 @@ class WP_Product_Personalizer {
             // Restaurar directorio original
             remove_filter('upload_dir', array($this, 'custom_upload_dir'));
             
+            // Log de la subida
+            $this->log_message('Resultado de la subida de imagen', $upload);
+            
             if (!isset($upload['error']) && isset($upload['url']) && isset($upload['file'])) {
                 $cart_item_data['wppp_custom_image'] = array(
                     'url' => $upload['url'],
                     'file' => $upload['file'],
                     'name' => basename($upload['file'])
                 );
+                
+                // Log de la imagen guardada en el carrito
+                $this->log_message('Imagen personalizada guardada en el carrito', $cart_item_data['wppp_custom_image']);
+            } else {
+                // Si hay un error, registrarlo
+                $this->log_message('Error al subir la imagen', isset($upload['error']) ? $upload['error'] : 'Error desconocido');
             }
         }
         
         // Si añadimos datos personalizados, hacer que el item sea único en el carrito
         if (!empty($cart_item_data['wppp_custom_message']) || !empty($cart_item_data['wppp_custom_image'])) {
             $cart_item_data['wppp_unique_key'] = md5(microtime() . rand());
+            
+            // Log de datos finales
+            $this->log_message('Datos finales añadidos al carrito', $cart_item_data);
         }
         
         return $cart_item_data;
@@ -253,6 +306,9 @@ class WP_Product_Personalizer {
      * Mostrar datos de personalización en el carrito
      */
     public function display_personalization_cart_item_data($item_data, $cart_item) {
+        // Log para depuración
+        $this->log_message('Mostrando datos en carrito', isset($cart_item) ? $cart_item : 'No hay datos del carrito');
+        
         if (isset($cart_item['wppp_custom_message']) && !empty($cart_item['wppp_custom_message'])) {
             $item_data[] = array(
                 'key' => __('Mensaje personalizado', 'wp-product-personalizer'),
@@ -279,20 +335,28 @@ class WP_Product_Personalizer {
      * Añadir datos de personalización a los items del pedido
      */
     public function add_personalization_to_order_items($item, $cart_item_key, $values, $order) {
+        // Log para depuración
+        $this->log_message('Añadiendo datos a pedido', $values);
+        
         // Guardar mensaje personalizado
         if (isset($values['wppp_custom_message']) && !empty($values['wppp_custom_message'])) {
-            $item->update_meta_data('wppp_custom_message', $values['wppp_custom_message']);
+            $item->update_meta_data('Mensaje personalizado', $values['wppp_custom_message']);
+            $this->log_message('Mensaje guardado en pedido', $values['wppp_custom_message']);
         }
         
         // Guardar imagen personalizada
         if (isset($values['wppp_custom_image']) && !empty($values['wppp_custom_image']['url'])) {
-            $item->update_meta_data('wppp_custom_image_url', $values['wppp_custom_image']['url']);
+            $item->update_meta_data('Imagen personalizada', $values['wppp_custom_image']['url']);
+            
             if (isset($values['wppp_custom_image']['file'])) {
-                $item->update_meta_data('wppp_custom_image_file', $values['wppp_custom_image']['file']);
+                $item->update_meta_data('_wppp_custom_image_file', $values['wppp_custom_image']['file']);
             }
+            
             if (isset($values['wppp_custom_image']['name'])) {
-                $item->update_meta_data('wppp_custom_image_name', $values['wppp_custom_image']['name']);
+                $item->update_meta_data('_wppp_custom_image_name', $values['wppp_custom_image']['name']);
             }
+            
+            $this->log_message('Imagen guardada en pedido', $values['wppp_custom_image']);
         }
     }
     
@@ -304,29 +368,40 @@ class WP_Product_Personalizer {
             return;
         }
         
-        echo '<div class="wppp-order-personalization">';
-        echo '<h3>' . __('Personalizaciones de productos', 'wp-product-personalizer') . '</h3>';
+        // Log para depuración
+        $this->log_message('Mostrando datos en pedido admin', 'ID: ' . $order->get_id());
+        
+        echo '<div class="wppp-order-personalization" style="margin-top: 20px; margin-bottom: 20px;">';
+        echo '<h2>' . __('Personalizaciones de productos', 'wp-product-personalizer') . '</h2>';
         
         $found_personalization = false;
         
         // Procesar cada ítem del pedido
         foreach ($order->get_items() as $item_id => $item) {
             $product_name = $item->get_name();
-            $custom_message = $item->get_meta('wppp_custom_message');
-            $custom_image_url = $item->get_meta('wppp_custom_image_url');
+            $custom_message = $item->get_meta('Mensaje personalizado');
+            $custom_image_url = $item->get_meta('Imagen personalizada');
+            
+            // Log de datos encontrados
+            $this->log_message('Datos de personalización encontrados', array(
+                'item_id' => $item_id,
+                'product' => $product_name,
+                'message' => $custom_message,
+                'image' => $custom_image_url
+            ));
             
             // Si hay personalización para este ítem
             if (!empty($custom_message) || !empty($custom_image_url)) {
                 $found_personalization = true;
                 
-                echo '<div class="wppp-item-personalization">';
-                echo '<h4>' . sprintf(__('Personalización para: %s', 'wp-product-personalizer'), esc_html($product_name)) . '</h4>';
+                echo '<div class="wppp-item-personalization" style="margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; background-color: #f8f8f8; border-radius: 5px;">';
+                echo '<h3>' . sprintf(__('Personalización para: %s', 'wp-product-personalizer'), esc_html($product_name)) . '</h3>';
                 
                 // Mostrar mensaje personalizado
                 if (!empty($custom_message)) {
-                    echo '<div class="wppp-custom-message">';
+                    echo '<div class="wppp-custom-message" style="margin-bottom: 15px;">';
                     echo '<strong>' . __('Mensaje personalizado:', 'wp-product-personalizer') . '</strong>';
-                    echo '<p>' . esc_html($custom_message) . '</p>';
+                    echo '<p style="background: #fff; padding: 10px; border: 1px solid #eee;">' . esc_html($custom_message) . '</p>';
                     echo '</div>';
                 }
                 
@@ -335,7 +410,7 @@ class WP_Product_Personalizer {
                     echo '<div class="wppp-custom-image">';
                     echo '<strong>' . __('Imagen personalizada:', 'wp-product-personalizer') . '</strong><br>';
                     echo '<a href="' . esc_url($custom_image_url) . '" target="_blank">';
-                    echo '<img src="' . esc_url($custom_image_url) . '" style="max-width: 150px; max-height: 150px; margin-top: 10px; border: 1px solid #ddd; padding: 5px;">';
+                    echo '<img src="' . esc_url($custom_image_url) . '" style="max-width: 200px; max-height: 200px; margin-top: 10px; border: 1px solid #ddd; padding: 5px; background: #fff;">';
                     echo '</a>';
                     echo '</div>';
                 }
@@ -373,8 +448,8 @@ class WP_Product_Personalizer {
         // Procesar cada ítem del pedido
         foreach ($order->get_items() as $item_id => $item) {
             $product_name = $item->get_name();
-            $custom_message = $item->get_meta('wppp_custom_message');
-            $custom_image_url = $item->get_meta('wppp_custom_image_url');
+            $custom_message = $item->get_meta('Mensaje personalizado');
+            $custom_image_url = $item->get_meta('Imagen personalizada');
             
             // Si hay personalización para este ítem
             if (!empty($custom_message) || !empty($custom_image_url)) {
