@@ -3,7 +3,7 @@
  * Plugin Name: WP Product Personalizer
  * Plugin URI: https://github.com/CeferinSoftware/wp-product-personalizer
  * Description: Permite a los clientes subir imágenes personalizadas y añadir mensajes a los productos.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: CeferinSoftware
  * Author URI: https://github.com/CeferinSoftware
  * Text Domain: wp-product-personalizer
@@ -20,7 +20,7 @@ if (!defined('WPINC')) {
 }
 
 // Definir constantes del plugin
-define('WPPP_VERSION', '1.0.0');
+define('WPPP_VERSION', '1.0.1');
 define('WPPP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPPP_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPPP_PLUGIN_BASENAME', plugin_basename(__FILE__));
@@ -33,6 +33,13 @@ function run_wp_product_personalizer() {
     $plugin = new WP_Product_Personalizer();
     $plugin->run();
 }
+
+// Declarar compatibilidad con HPOS (Almacenamiento de pedidos de alto rendimiento)
+add_action('before_woocommerce_init', function() {
+    if (class_exists('\Automattic\WooCommerce\Utilities\FeaturesUtil')) {
+        \Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility('custom_order_tables', __FILE__, true);
+    }
+});
 
 // Asegurarse de que WooCommerce está activo
 register_activation_hook(__FILE__, 'wppp_activation_check');
