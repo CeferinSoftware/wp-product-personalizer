@@ -19,6 +19,7 @@ Esta información se muestra en cada pedido, facilitando la personalización de 
 - Previsualización de la imagen subida antes de añadir al carrito.
 - Visualización de la información personalizada en la página de administración de pedidos.
 - **Compatible con el almacenamiento de pedidos de alto rendimiento (HPOS) de WooCommerce**.
+- **Carga de imágenes mediante AJAX para mejorar la fiabilidad**.
 
 ## Instalación
 
@@ -50,12 +51,22 @@ Este plugin es compatible con la característica de almacenamiento de pedidos de
 
 - Los campos de personalización aparecerán automáticamente en las páginas de productos configurados, justo antes del botón de "Añadir al carrito".
 - Los clientes pueden subir imágenes y añadir mensajes según la configuración.
+- Las imágenes se cargan mediante AJAX antes de que el cliente añada el producto al carrito, garantizando que la imagen se procese correctamente.
 - La información personalizada se guarda con cada pedido y se muestra en la página de administración de pedidos.
 
 ## Versiones
 
 - 1.0.0: Versión inicial.
 - 1.0.1: Añadida compatibilidad con almacenamiento de pedidos de alto rendimiento (HPOS) de WooCommerce.
+- 1.0.2: Mejorado el sistema de carga de imágenes con AJAX para mayor fiabilidad. Corregidos problemas con el guardado de datos personalizados en pedidos.
+
+## Resolución de problemas
+
+Si los datos personalizados no aparecen en los pedidos, comprueba lo siguiente:
+
+1. Asegúrate de que tu tema es compatible con WooCommerce y que no está sobrescribiendo las plantillas de carrito/checkout.
+2. Verifica que los permisos de escritura en la carpeta de uploads estén correctamente configurados.
+3. Comprueba los logs de errores de PHP por si hubiera algún problema con el procesamiento AJAX.
 
 ## Soporte
 
