@@ -1,0 +1,55 @@
+/**
+ * Estilos para el frontend del plugin
+ */
+.wp-product-personalizer-fields {
+    margin: 20px 0;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+.wp-product-personalizer-image-field,
+.wp-product-personalizer-message-field {
+    margin-bottom: 15px;
+}
+
+.wp-product-personalizer-fields label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.wp-product-personalizer-fields input[type="file"] {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.wp-product-personalizer-fields textarea {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.wppp-preview-image {
+    max-width: 150px;
+    max-height: 150px;
+    margin-top: 10px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 3px;
+    background-color: #fff;
+}
+
+/* Estilos responsivos */
+@media (max-width: 768px) {
+    .wp-product-personalizer-fields {
+        padding: 10px;
+    }
+    
+    .wppp-preview-image {
+        max-width: 100px;
+        max-height: 100px;
+    }
+}
