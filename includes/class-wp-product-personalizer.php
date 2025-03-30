@@ -19,8 +19,18 @@ class WP_Product_Personalizer {
         add_action('woocommerce_before_add_to_cart_button', array($this, 'display_personalization_fields'));
         add_filter('woocommerce_add_cart_item_data', array($this, 'add_personalization_to_cart'), 10, 3);
         add_filter('woocommerce_get_item_data', array($this, 'display_personalization_cart_item_data'), 10, 2);
-        add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items'), 10, 4);
-        add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization'), 10, 1);
+        
+        // Compatibilidad con almacenamiento de pedidos de alto rendimiento
+        if ($this->is_hpos_enabled()) {
+            // Usar los nuevos hooks para HPOS
+            add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items_hpos'), 10, 4);
+            add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization_hpos'), 10, 1);
+        } else {
+            // Usar los hooks tradicionales
+            add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_personalization_to_order_items'), 10, 4);
+            add_action('woocommerce_admin_order_data_after_billing_address', array($this, 'display_order_personalization'), 10, 1);
+        }
+        
         add_action('wp_enqueue_scripts', array($this, 'enqueue_scripts'));
         add_action('admin_enqueue_scripts', array($this, 'admin_enqueue_scripts'));
     }
@@ -30,6 +40,16 @@ class WP_Product_Personalizer {
      */
     private function load_dependencies() {
         // Aquí se pueden cargar clases adicionales si se requieren
+    }
+    
+    /**
+     * Comprobar si el almacenamiento de pedidos de alto rendimiento está activado
+     */
+    private function is_hpos_enabled() {
+        if (class_exists('\Automattic\WooCommerce\Utilities\OrderUtil')) {
+            return \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+        }
+        return false;
     }
     
     /**
@@ -216,7 +236,7 @@ class WP_Product_Personalizer {
     }
     
     /**
-     * Añadir datos de personalización a los items del pedido
+     * Añadir datos de personalización a los items del pedido (sistema tradicional)
      */
     public function add_personalization_to_order_items($item, $cart_item_key, $values, $order) {
         if (isset($values['wppp_custom_message'])) {
@@ -231,9 +251,60 @@ class WP_Product_Personalizer {
     }
     
     /**
-     * Mostrar información de personalización en la página de administración del pedido
+     * Añadir datos de personalización a los items del pedido (compatible con HPOS)
+     */
+    public function add_personalization_to_order_items_hpos($item, $cart_item_key, $values, $order) {
+        if (isset($values['wppp_custom_message'])) {
+            $item->add_meta_data(__('Mensaje personalizado', 'wp-product-personalizer'), $values['wppp_custom_message']);
+        }
+        
+        if (isset($values['wppp_custom_image'])) {
+            $item->add_meta_data(__('Imagen personalizada', 'wp-product-personalizer'), $values['wppp_custom_image']['url']);
+            $item->add_meta_data('_wppp_custom_image_path', $values['wppp_custom_image']['path'], true);
+            $item->add_meta_data('_wppp_custom_image_name', $values['wppp_custom_image']['name'], true);
+        }
+    }
+    
+    /**
+     * Mostrar información de personalización en la página de administración del pedido (sistema tradicional)
      */
     public function display_order_personalization($order) {
+        $items = $order->get_items();
+        
+        foreach ($items as $item_id => $item) {
+            $message = $item->get_meta('Mensaje personalizado');
+            $image_url = $item->get_meta('Imagen personalizada');
+            
+            if (!empty($message) || !empty($image_url)) {
+                echo '<div class="order-personalization">';
+                echo '<h3>' . __('Personalización para', 'wp-product-personalizer') . ' ' . $item->get_name() . '</h3>';
+                
+                if (!empty($message)) {
+                    echo '<p><strong>' . __('Mensaje personalizado', 'wp-product-personalizer') . ':</strong> ' . esc_html($message) . '</p>';
+                }
+                
+                if (!empty($image_url)) {
+                    echo '<p><strong>' . __('Imagen personalizada', 'wp-product-personalizer') . ':</strong></p>';
+                    echo '<p><a href="' . esc_url($image_url) . '" target="_blank">';
+                    echo '<img src="' . esc_url($image_url) . '" style="max-width: 150px; max-height: 150px;">';
+                    echo '</a></p>';
+                }
+                
+                echo '</div>';
+            }
+        }
+    }
+    
+    /**
+     * Mostrar información de personalización en la página de administración del pedido (compatible con HPOS)
+     */
+    public function display_order_personalization_hpos($order) {
+        // Asegurarse de que tenemos un objeto de pedido compatible con HPOS
+        if (!($order instanceof \WC_Order)) {
+            return;
+        }
+        
+        // Obtener los ítems del pedido usando el sistema HPOS
         $items = $order->get_items();
         
         foreach ($items as $item_id => $item) {
