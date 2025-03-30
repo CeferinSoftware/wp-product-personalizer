@@ -3,7 +3,7 @@
  * Plugin Name: WP Product Personalizer
  * Plugin URI: https://github.com/CeferinSoftware/wp-product-personalizer
  * Description: Permite a los clientes subir imágenes personalizadas y añadir mensajes a los productos.
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: CeferinSoftware
  * Author URI: https://github.com/CeferinSoftware
  * Text Domain: wp-product-personalizer
@@ -20,7 +20,7 @@ if (!defined('WPINC')) {
 }
 
 // Definir constantes del plugin
-define('WPPP_VERSION', '1.0.1');
+define('WPPP_VERSION', '1.0.2');
 define('WPPP_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPPP_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPPP_PLUGIN_BASENAME', plugin_basename(__FILE__));
