@@ -23,6 +23,9 @@
 .wp-product-personalizer-fields input[type="file"] {
     width: 100%;
     margin-bottom: 10px;
+    border: 1px solid #ddd;
+    padding: 5px;
+    background-color: #fff;
 }
 
 .wp-product-personalizer-fields textarea {
@@ -42,24 +45,24 @@
     background-color: #fff;
 }
 
-/* Estados de carga */
-.wppp-upload-status {
-    margin-top: 5px;
-    padding: 5px;
-    font-size: 14px;
-    border-radius: 3px;
+/* Mensaje de error */
+.wppp-error {
+    padding: 10px;
+    margin-bottom: 15px;
+    color: #721c24;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 5px;
 }
 
-.wppp-upload-status.success {
-    background-color: #dff0d8;
-    color: #3c763d;
-    border: 1px solid #d6e9c6;
-}
-
-.wppp-upload-status.error {
-    background-color: #f2dede;
-    color: #a94442;
-    border: 1px solid #ebccd1;
+/* Mensaje de éxito */
+.wppp-success {
+    padding: 10px;
+    margin-bottom: 15px;
+    color: #155724;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 5px;
 }
 
 /* Estilos responsivos */
